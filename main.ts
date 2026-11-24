@@ -59,6 +59,24 @@ class Tree {
   get(p: string): string | null {
     return this.now.has(p) ? this.now.get(p)! : this.original(p);
   }
+  /**
+   * Whether the path exists in the tree as edited: a file in it, or anything at
+   * that path on disk. A directory counts: SPEC.md section 2 reports `exists`
+   * when an edit creates a file, or moves a file to a path, that exists, and a
+   * path a directory occupies exists even though it holds no file text, so
+   * `get` (which reads files only) must not be the existence test for a
+   * create or a move destination. A path an earlier edit deleted does not
+   * exist, so it can be created again in the same patch.
+   */
+  exists(p: string): boolean {
+    if (this.now.has(p)) return this.now.get(p) !== null;
+    try {
+      statSync(p);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 type Edit = (tree: Tree) => void;
@@ -179,7 +197,7 @@ function jsonEdit(v: unknown): Edit | null {
     const text = o.file_text;
     return (tree) => {
       if (!safe(p)) throw new Fail('unsafe', p);
-      if (tree.get(p) !== null) throw new Fail('exists', p);
+      if (tree.exists(p)) throw new Fail('exists', p);
       tree.now.set(p, text);
     };
   }
@@ -424,7 +442,7 @@ function unifiedEdits(lines: string[], strict: boolean, moves: Array<[string, st
     if (isCreate) {
       return (tree: Tree): void => {
         if (!safe(dest)) throw new Fail('unsafe', dest);
-        if (tree.get(dest) !== null) throw new Fail('exists', dest);
+        if (tree.exists(dest)) throw new Fail('exists', dest);
         const plus: string[] = [];
         let noBreak = false;
         for (const h of sec.hunks) {
@@ -451,7 +469,7 @@ function unifiedEdits(lines: string[], strict: boolean, moves: Array<[string, st
       if (isMove && !safe(dest)) throw new Fail('unsafe', dest);
       const cur = tree.get(path);
       if (cur === null) throw new Fail('missing', path);
-      if (isMove && tree.get(dest) !== null) throw new Fail('exists', dest);
+      if (isMove && tree.exists(dest)) throw new Fail('exists', dest);
       const f = parseFile(cur);
       let d = 0;
       for (const h of sec.hunks) {
@@ -513,7 +531,7 @@ function srEdit(path: string, O: string[], N: string[], strict: boolean): Edit {
   return (tree: Tree): void => {
     if (!safe(path)) throw new Fail('unsafe', path);
     if (O.length === 0) {
-      if (tree.get(path) !== null) throw new Fail('exists', path);
+      if (tree.exists(path)) throw new Fail('exists', path);
       tree.now.set(path, N.length === 0 ? '' : N.join('\n') + '\n');
       return;
     }
@@ -650,7 +668,7 @@ function buildV4aEdit(
     }
     return (tree: Tree): void => {
       if (!safe(path)) throw new Fail('unsafe', path);
-      if (tree.get(path) !== null) throw new Fail('exists', path);
+      if (tree.exists(path)) throw new Fail('exists', path);
       tree.now.set(path, fileLines.length === 0 ? '' : fileLines.join('\n') + '\n');
     };
   }
@@ -705,7 +723,7 @@ function buildV4aEdit(
     if (moveTo !== null && !safe(moveTo)) throw new Fail('unsafe', moveTo);
     const curText = tree.get(path);
     if (curText === null) throw new Fail('missing', path);
-    if (moveTo !== null && tree.get(moveTo) !== null) throw new Fail('exists', moveTo);
+    if (moveTo !== null && tree.exists(moveTo)) throw new Fail('exists', moveTo);
     const f = parseFile(curText);
     let cursor = 0;
     for (const ch of chunks) {
